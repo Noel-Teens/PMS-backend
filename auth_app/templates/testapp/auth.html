@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Auth Test — Register / Login / Google</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; line-height: 1.4; }
+    h1 { margin-bottom: 0; }
+    small { color: #666; }
+    section { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 16px 0; }
+    label { display: block; margin: 8px 0 4px; }
+    input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+    button { padding: 10px 14px; border: none; border-radius: 10px; cursor: pointer; }
+    button.primary { background: #0d6efd; color: white; }
+    button.ghost { background: #f2f2f2; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    pre { background: #0b1020; color: #e6edf3; padding: 12px; border-radius: 10px; overflow:auto; }
+    .ok { color: #0a7a0a; } .err { color: #b00020; }
+    .pill { display: inline-block; padding: 4px 10px; background: #eef; border-radius: 999px; margin-left: 8px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Auth Test</h1>
+  <small>Register • Login • Google → SimpleJWT</small>
+
+  <!-- Config Section -->
+  <section>
+    <h2>Config</h2>
+    <div class="row">
+      <div>
+        <label>API Base URL (your Django)</label>
+        <input id="apiBase" placeholder="http://localhost:8000" />
+      </div>
+      <div></div>
+      <div>
+        <label>Firebase config (apiKey)</label>
+        <input id="fb_apiKey" placeholder="AIza..." />
+      </div>
+      <div>
+        <label>Firebase config (authDomain)</label>
+        <input id="fb_authDomain" placeholder="yourapp.firebaseapp.com" />
+      </div>
+      <div>
+        <label>Firebase config (projectId)</label>
+        <input id="fb_projectId" placeholder="your-project-id" />
+      </div>
+      <div>
+        <label>Firebase config (appId)</label>
+        <input id="fb_appId" placeholder="1:123:web:abc" />
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="ghost" id="saveCfg">Save Config</button>
+      <span class="pill">Stored in localStorage</span>
+    </div>
+  </section>
+
+  <!-- Register Section -->
+  <section>
+    <h2>Register</h2>
+    <div class="row">
+      <div>
+        <label>Username</label>
+        <input id="reg_username" placeholder="alice"/>
+      </div>
+      <div>
+        <label>Email</label>
+        <input id="reg_email" placeholder="alice@example.com"/>
+      </div>
+      <div>
+        <label>Password</label>
+        <input id="reg_password" type="password" placeholder="••••••••"/>
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <button class="primary" id="btnRegister">Register</button>
+      </div>
+    </div>
+    <div id="out_register"></div>
+  </section>
+
+  <!-- Login Section -->
+  <section>
+    <h2>Login</h2>
+    <div class="row">
+      <div>
+        <label>Username</label>
+        <input id="login_username" placeholder="alice"/>
+      </div>
+      <div>
+        <label>Password</label>
+        <input id="login_password" type="password" placeholder="••••••••"/>
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <button class="primary" id="btnLogin">Login</button>
+      </div>
+    </div>
+    <div id="out_login"></div>
+  </section>
+
+  <!-- Google Login Section -->
+  <section>
+    <h2>Google Login (via Firebase)</h2>
+    <p>Requires Firebase Auth (client) to get an ID token. Your backend will verify it and issue SimpleJWT.</p>
+    <div>
+      <button class="primary" id="btnGoogle">Continue with Google</button>
+    </div>
+    <div id="out_google"></div>
+  </section>
+
+  <!-- Tokens Section -->
+  <section>
+    <h2>Stored Tokens</h2>
+    <button class="ghost" id="btnShowTokens">Show</button>
+    <button class="ghost" id="btnClearTokens">Clear</button>
+    <pre id="out_tokens" style="display:none"></pre>
+  </section>
+
+  <!-- Protected API Call -->
+  <section>
+    <h2>Quick Protected Call</h2>
+    <div class="row">
+      <div>
+        <label>GET path (relative to API base)</label>
+        <input id="prot_path" placeholder="/api/secure/me/"/>
+      </div>
+      <div style="display:flex; align-items:flex-end;">
+        <button class="primary" id="btnProtected">Call</button>
+      </div>
+    </div>
+    <pre id="out_protected" style="display:none"></pre>
+  </section>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+
+  <script>
+    function el(id){ return document.getElementById(id); }
+    function showJSON(target, obj){
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(obj, null, 2);
+      target.innerHTML = '';
+      target.appendChild(pre);
+    }
+    function setStatus(target, ok, msg){
+      target.innerHTML = '<div class="'+(ok?'ok':'err')+'">'+msg+'</div>';
+    }
+    function saveTokens(data){
+      if(data && data.access) localStorage.setItem('access', data.access);
+      if(data && data.refresh) localStorage.setItem('refresh', data.refresh);
+      if(data && data.user) localStorage.setItem('user', JSON.stringify(data.user));
+    }
+
+    // Load saved config
+    function loadCfg(){
+      el('apiBase').value = localStorage.getItem('apiBase') || 'http://localhost:8000';
+      el('fb_apiKey').value = "AIzaSyBqKT1K2WNUaMBNNr-gb5T0jIK7YMPm2nc" || '';
+      el('fb_authDomain').value = "paper-ms.firebaseapp.com" || '';
+      el('fb_projectId').value = "paper-ms" || '';
+      el('fb_appId').value = "1:131317648054:web:b74cd5f211dcb3869bf417" || '';
+    }
+    loadCfg();
+    el('saveCfg').onclick = () => {
+      ['apiBase','fb_apiKey','fb_authDomain','fb_projectId','fb_appId'].forEach(k => {
+        localStorage.setItem(k, el(k).value || '');
+      });
+      alert('Saved');
+    };
+    function getApi(path){
+      const base = (el('apiBase').value || '').replace(/\/+$/,'');
+      return base + path;
+    }
+
+    // --- Register
+    el('btnRegister').onclick = async () => {
+      const out = el('out_register');
+      const payload = {
+        username: el('reg_username').value.trim(),
+        email: el('reg_email').value.trim(),
+        password: el('reg_password').value,
+      };
+      try{
+        const res = await fetch(getApi('/auth/register/'),{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        let data = await res.json();
+        if(!res.ok){ setStatus(out,false,data.detail||'Register failed'); showJSON(out,data); return; }
+        setStatus(out,true,'Register OK'); showJSON(out,data); saveTokens(data);
+      }catch(err){ setStatus(out,false,'Network/JS error'); showJSON(out,{error:String(err)}); }
+    };
+
+    // --- Login
+    el('btnLogin').onclick = async () => {
+      const out = el('out_login');
+      const payload = {
+        username: el('login_username').value.trim(),
+        password: el('login_password').value,
+      };
+      try{
+        const res = await fetch(getApi('/auth/login/'),{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        let data = await res.json();
+        if(!res.ok){ setStatus(out,false,data.detail||'Login failed'); showJSON(out,data); return; }
+        setStatus(out,true,'Login OK'); showJSON(out,data); saveTokens(data);
+      }catch(err){ setStatus(out,false,'Network/JS error'); showJSON(out,{error:String(err)}); }
+    };
+
+    // --- Google Login
+    let fbApp=null, fbAuth=null;
+    function ensureFirebaseInit(){
+      if(fbApp) return;
+      const apiKey = el('fb_apiKey').value.trim();
+      const authDomain = el('fb_authDomain').value.trim();
+      const projectId = el('fb_projectId').value.trim();
+      const appId = el('fb_appId').value.trim();
+      if(!apiKey || !authDomain || !projectId || !appId){
+        alert('Enter Firebase config.'); throw new Error('Missing Firebase config');
+      }
+      fbApp = firebase.initializeApp({ apiKey, authDomain, projectId, appId });
+      fbAuth = firebase.auth();
+    }
+
+    el('btnGoogle').onclick = async () => {
+    ensureFirebaseInit();
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await fbAuth.signInWithRedirect(provider); // redirect to Google login
+};
+
+// This runs on page load, after redirect
+window.addEventListener('load', async () => {
+    ensureFirebaseInit();
+
+    try {
+        const result = await fbAuth.getRedirectResult();
+        if (result.user) {
+            const idToken = await result.user.getIdToken(true);
+            console.log('ID token obtained from redirect:', idToken);
+
+            // send idToken to Django backend
+            const res = await fetch(getApi('/auth_app/google/'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_token: idToken })
+            });
+
+            const data = await res.json();
+            console.log('Backend response:', data);
+            // Optionally save tokens to localStorage
+        }
+    } catch (err) {
+        console.error('Redirect login error:', err);
+    }
+});
+
+    // el('btnGoogle').onclick = async () => {
+    //   const out = el('out_google');
+    //   let idToken=null;
+    //   try{
+    //     ensureFirebaseInit();
+    //     const provider = new firebase.auth.GoogleAuthProvider();
+    //     try {
+    //       const result = await fbAuth.getRedirectResult();
+    //       if(result.user){
+    //         const idToken = await result.user.getIdToken(true);
+    //         console.log('ID token obtained from redirect:', idToken);
+
+    //         // send idToken to Django backend
+    //         const res = await fetch(getApi('/auth_app/google/'),{
+    //           method:'POST',
+    //           headers:{'Content-Type':'application/json'},
+    //           body: JSON.stringify({ id_token: idToken })
+    //         });
+    //         const data = await res.json();
+    //         console.log('Backend response:', data);
+    //       }
+    //     } catch (err) {
+    //       console.error('Redirect login error:', err);
+    //     }
+    //     idToken = await result.user.getIdToken(true);
+
+    //     const res = await fetch(getApi('/auth/google/'),{
+    //       method:'POST',
+    //       headers:{'Content-Type':'application/json'},
+    //       body: JSON.stringify({ id_token: idToken })
+    //     });
+
+    //     let data;
+    //     const contentType = res.headers.get('content-type');
+    //     if(contentType && contentType.includes('application/json')){
+    //       data = await res.json();
+    //     } else {
+    //       const text = await res.text();
+    //       throw new Error('Server returned non-JSON: ' + text);
+    //     }
+
+    //     if(!res.ok){ setStatus(out,false,data.detail||'Google login failed'); showJSON(out,data); return; }
+    //     setStatus(out,true,'Google Login OK'); showJSON(out,data); saveTokens(data);
+
+    //   }catch(err){
+    //     if(err.code==='auth/popup-closed-by-user'){
+    //         setStatus(out,false,'You closed the popup before completing login.');
+    //     } else {
+    //         setStatus(out,false,'Google flow error');
+    //     }
+    //     showJSON(out,{error:String(err)});
+    //   }
+    // };
+
+    // --- Tokens
+    el('btnShowTokens').onclick = ()=>{
+      const box=el('out_tokens');
+      const payload={
+        access: localStorage.getItem('access')||null,
+        refresh: localStorage.getItem('refresh')||null,
+        user: (()=>{ try{return JSON.parse(localStorage.getItem('user')||'null')}catch(e){return null} })(),
+      };
+      box.style.display='block'; box.textContent=JSON.stringify(payload,null,2);
+    };
+    el('btnClearTokens').onclick = ()=>{
+      ['access','refresh','user'].forEach(k=>localStorage.removeItem(k));
+      el('out_tokens').style.display='none';
+      alert('Tokens cleared');
+    };
+
+    // --- Protected API
+    el('btnProtected').onclick = async ()=>{
+      const out=el('out_protected');
+      const access=localStorage.getItem('access');
+      if(!access){ alert('No access token. Login first.'); return; }
+      const path=el('prot_path').value||'/api/secure/me/';
+      try{
+        const res=await fetch(getApi(path),{
+          method:'GET',
+          headers:{ 'Authorization':'Bearer '+access }
+        });
+        const data=await res.json().catch(()=>({text:'non-JSON response'}));
+        out.style.display='block'; out.textContent=JSON.stringify({status:res.status,data},null,2);
+      }catch(err){ out.style.display='block'; out.textContent=JSON.stringify({error:String(err)},null,2); }
+    };
+  </script>
+</body>
+</html>
