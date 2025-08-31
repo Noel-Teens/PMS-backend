@@ -65,6 +65,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",   # React local dev server
     "http://127.0.0.1:3000",
     "http://localhost:5173",
+    "https://paper-management-system.netlify.app",  # Deployed React app
 ]
 
 # Allow all CORS headers and methods for API testing
